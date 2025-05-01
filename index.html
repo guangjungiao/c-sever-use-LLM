@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>前后端交互示例</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+        .container { margin-bottom: 20px; }
+        button { padding: 8px 16px; margin-top: 10px; }
+        #response { margin-top: 20px; padding: 10px; border: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+    <h1>前后端交互示例</h1>
+    
+    <!-- 发送数据到后端 -->
+    <div class="container">
+        <h2>发送数据到服务器</h2>
+        <input type="text" id="inputData" placeholder="输入要发送的内容">
+        <button id="sendBtn">提交</button>
+    </div>
+    
+    <!-- 从后端获取数据 -->
+    <div class="container">
+        <h2>从服务器获取数据</h2>
+        <button id="getBtn">获取数据</button>
+        <div id="response"></div>
+    </div>
+
+    <script>
+        // 发送数据到后端
+        document.getElementById('sendBtn').addEventListener('click', async () => {
+            const inputData = document.getElementById('inputData').value;
+            if (!inputData) {
+                alert('请输入内容');
+                return;
+            }
+
+            try {
+                const response = await fetch('/submit', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify( {data:inputData })
+                });
+                
+                const result = await response.json();
+                alert(`服务器响应: ${result.message}`);
+            } catch (error) {
+                console.error('发送失败:', error);
+                alert('发送失败');
+            }
+        });
+
+        // 从后端获取数据
+        document.getElementById('getBtn').addEventListener('click', async () => {
+            try {
+                const response = await fetch('/getdata');
+                const data = await response.json();
+                document.getElementById('response').textContent = `从服务器获取的数据: ${data.message}`;
+            } catch (error) {
+                console.error('获取数据失败:', error);
+                document.getElementById('response').textContent = '获取数据失败';
+            }
+        });
+    </script>
+</body>
+</html>
