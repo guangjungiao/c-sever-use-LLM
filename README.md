@@ -13,4 +13,5 @@
 - bash ./build_run.sh
 - bash ./run_SeverAndLLM.sh  # 先启动sever，再LLM.py
 
-### 3. 后续估计会继续优化 （可能考虑弄一下搜索引擎 加个mysql什么的）
+### 3. 后续持续更新优化。。。 （可能考虑弄一下搜索引擎、加个mysql什么的、优化一下代码结构以及用makefile不然太乱了、实现一些中间件之类的吧）
+
