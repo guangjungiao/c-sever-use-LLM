@@ -18,11 +18,19 @@
 #include <fstream>
 #include <nlohmann/json.hpp> // 需要添加JSON库
 #include <queue>
+#include <mqueue.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <cstring>
+#include <semaphore.h>
+#include <cerrno>
 
 #define PORT 8080
 #define MAX_EVENTS 10000
 #define THREAD_POOL_SIZE 16
 #define BUFFER_SIZE 4096
+
+//const std::string& shm_name = "/my_shared_mem";
 
 using json = nlohmann::json;
 
@@ -45,8 +53,7 @@ public:
                         this->condition.wait(lock, [this] {
                             return this->stop || !this->tasks.empty();
                         });
-                        if(this->stop && this->tasks.empty())
-                            return;
+                        if(this->stop && this->tasks.empty()) return;
                         task = std::move(this->tasks.front());
                         this->tasks.pop();
                     }
@@ -62,7 +69,7 @@ public:
         //     std::unique_lock<std::mutex> lock(queue_mutex);
         //     tasks.emplace([=] { f(args...); });
         // }
-
+        //std::cout<<"start"<<std::endl;
         std::function<void()> task = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
         {
             std::unique_lock<std::mutex> lock(this->queue_mutex);
@@ -77,8 +84,9 @@ public:
             stop = true;
         }
         condition.notify_all();
-        for(std::thread &worker: workers)
-            worker.join();
+        for(std::thread &worker: workers) worker.join();
+        //std::cout<<"delete"<<std::endl;
+        
     }
 
 private:
@@ -89,10 +97,110 @@ private:
     bool stop;
 };
 
-// HTTP服务器类
-class HttpServer {
+// 共享内存与信号量
+class SharedMemoryIPC 
+{
 public:
-    HttpServer() : pool(THREAD_POOL_SIZE) {
+    SharedMemoryIPC(const std::string& shm_name, const std::string& sem_name, size_t size) 
+        : shm_name_(shm_name), sem_name_(sem_name), size_(size) {
+        // 创建或打开信号量 (初始值为1，二进制信号量)
+        sem_ = sem_open(sem_name_.c_str(), O_CREAT, 0666, 1);
+        if (sem_ == SEM_FAILED) {
+            std::cerr << "Failed to create semaphore: " << strerror(errno) << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        // 创建共享内存
+        shm_fd_ = shm_open(shm_name_.c_str(), O_CREAT | O_RDWR, 0666);
+        if (shm_fd_ == -1) {
+            std::cerr << "Failed to create shared memory: " << strerror(errno) << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        ftruncate(shm_fd_, size_);//xitongdiaoyong shezhidaxiao
+    }
+
+    ~SharedMemoryIPC() {
+        //shifang
+        close(shm_fd_);
+        sem_close(sem_);
+        // 注意：通常由最后一个使用的进程执行unlink
+
+        // shm_unlink(shm_name_.c_str());
+        // sem_unlink(sem_name_.c_str());
+    }
+
+    void write_data(const std::string& data) {
+        if (data.size() > size_) {
+            std::cerr << "Data size exceeds shared memory size" << std::endl;
+            return;
+        }
+
+        // 获取信号量
+        if (sem_wait(sem_) == -1) {
+            std::cerr << "sem_wait failed: " << strerror(errno) << std::endl;
+            return;
+        }
+
+        // 映射共享内存
+        void* ptr = mmap(0, size_, PROT_WRITE, MAP_SHARED, shm_fd_, 0);
+        if (ptr == MAP_FAILED) {
+            std::cerr << "mmap failed: " << strerror(errno) << std::endl;
+            sem_post(sem_);
+            return;
+        }
+
+        // 写入数据
+        memset(ptr, 0, size_); // 清空内存
+        memcpy(ptr, data.c_str(), data.size());
+
+        // 清理
+        munmap(ptr, size_);
+        sem_post(sem_); // 释放信号量
+    }
+
+    std::string read_data() {
+        // 获取信号量
+        if (sem_wait(sem_) == -1) {
+            std::cerr << "sem_wait failed: " << strerror(errno) << std::endl;
+            return "";
+        }
+
+        // 映射共享内存
+        void* ptr = mmap(0, size_, PROT_READ, MAP_SHARED, shm_fd_, 0);
+        if (ptr == MAP_FAILED) {
+            std::cerr << "mmap failed: " << strerror(errno) << std::endl;
+            sem_post(sem_);
+            return "";
+        }
+
+        // 读取数据
+        std::string data(static_cast<char*>(ptr));
+
+        // 清理
+        munmap(ptr, size_);
+        sem_post(sem_); // 释放信号量
+
+        std::cout<<"success read"<<std::endl;
+
+        return data;
+    }
+
+private:
+    std::string shm_name_;
+    std::string sem_name_;
+    size_t size_;
+    int shm_fd_;
+    sem_t* sem_;
+};
+
+// HTTP服务器类
+class HttpServer 
+{
+public:
+    HttpServer() : pool(THREAD_POOL_SIZE) ,ipc1("/my_shared_mem1", "/my_semaphore1", 1024),ipc2("/my_shared_mem2", "/my_semaphore2", 1024){
+        //实例化共享内存对象
+        //SharedMemoryIPC ipc("/my_shared_mem", "/my_semaphore", 1024);
+
         // 创建socket
         server_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
         if (server_fd == -1) {
@@ -164,10 +272,15 @@ public:
             }
         }
     }
+    
 
 private:
 
     std::string storedData; // 用于存储接收到的数据
+    
+
+    SharedMemoryIPC ipc1;//共享内存 sever2pyhton
+    SharedMemoryIPC ipc2;//共享内存 python2sever
 
     void handleNewConnection() {
         struct sockaddr_in client_addr;
@@ -175,8 +288,8 @@ private:
         int client_fd;
 
         // 接受所有待处理连接
-        while ((client_fd = accept4(server_fd, (struct sockaddr*)&client_addr, 
-                                  &client_addr_len, SOCK_NONBLOCK)) > 0) {
+        while ((client_fd = accept4(server_fd, (struct sockaddr*)&client_addr, &client_addr_len, SOCK_NONBLOCK)) > 0) 
+        {
             // 设置客户端socket为非阻塞
             int flags = fcntl(client_fd, F_GETFL, 0);
             fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
@@ -322,63 +435,6 @@ private:
 
 
 
-
-        /*
-        std::istringstream iss(request);
-        std::string method, path, protocol;
-        iss >> method >> path >> protocol;
-
-        // 简单的路由处理
-        //if (path == "/") 
-        {
-            path = "/index.html";
-        }
-
-        // 尝试读取文件
-        std::string filePath = "." + path;
-        std::ifstream file(filePath, std::ios::binary);
-
-        if (!file.is_open()) {
-            
-            // 文件不存在，返回404
-            return "HTTP/1.1 404 Not Found\r\n"
-                   "Content-Type: text/html\r\n"
-                   "Connection: close\r\n"
-                   "\r\n"
-                   "<html><body><h1>404 Not Found</h1></body></html>";
-        }
-        
-
-        // 读取文件内容
-        std::vector<char> fileContents((std::istreambuf_iterator<char>(file)), 
-                                     std::istreambuf_iterator<char>());
-
-        // 确定内容类型
-        std::string contentType = "text/plain";
-        if (path.find(".html") != std::string::npos) {
-            contentType = "text/html";
-        } else if (path.find(".css") != std::string::npos) {
-            contentType = "text/css";
-        } else if (path.find(".js") != std::string::npos) {
-            contentType = "application/javascript";
-        } else if (path.find(".jpg") != std::string::npos || path.find(".jpeg") != std::string::npos) {
-            contentType = "image/jpeg";
-        } else if (path.find(".png") != std::string::npos) {
-            contentType = "image/png";
-        }
-
-        // 构建HTTP响应
-        std::ostringstream response;
-        response << "HTTP/1.1 200 OK\r\n"
-                 << "Content-Type: " << contentType << "\r\n"
-                 << "Content-Length: " << fileContents.size() << "\r\n"
-                 << "Connection: close\r\n"
-                 << "\r\n";
-
-        response.write(fileContents.data(), fileContents.size());
-
-        return response.str();
-        */
     }
 
     void sendResponse(int client_fd, const std::string& response) {
@@ -421,6 +477,11 @@ private:
             std::cout<<"-------------------------------storedData22------------------------------"<<storedData<<std::endl;
             std::cout<<j<<std::endl;
             storedData = j["data"].get<std::string>();
+            
+            //shm 共享内存和python通信
+            ipc1.write_data(storedData);
+            std::cout << "Data written to shared memory" <<storedData<< std::endl;
+
             std::cout<<"-------------------------------storedData33------------------------------"<<storedData<<std::endl;
             
             // 构建JSON响应
@@ -440,9 +501,12 @@ private:
 
     std::string handleGetRequest() {
         json response;
-        response["message"] = storedData.empty() ? "暂无数据" : storedData;
+        //response["message"] = storedData.empty() ? "暂无数据" : storedData;
+        std::string result = ipc2.read_data();  //共享内存读
+        std::cout << "Received result: " << result << std::endl;
+        response["message"] = result.empty() ? "暂无数据" : result;
         std::cout<<"----------------------get-------------------------------------"<<std::endl;
-        std::cout<<"-------------------------------storedData------------------------------"<<response["message"]<<std::endl;
+        std::cout<<response["message"]<<std::endl;
         return buildJsonResponse(response.dump());
     }
 
