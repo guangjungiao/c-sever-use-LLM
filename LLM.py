@@ -99,7 +99,7 @@ class SharedMemoryIPC:
 if __name__ == "__main__":
 
 
-    dashscope.api_key="sk-6d3f5ac504e64907ba7a3e7bce73e6e9"
+    dashscope.api_key="xxxxx....9"  #用的阿里QWEN的api
     ipc1 = SharedMemoryIPC()
     ipc2 = SharedMemoryIPC(shm_name='/my_shared_mem2', sem_name='/my_semaphore2', size=1024)
 
