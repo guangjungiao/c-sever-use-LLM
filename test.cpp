@@ -502,7 +502,7 @@ private:
     std::string handleGetRequest() {
         json response;
         //response["message"] = storedData.empty() ? "暂无数据" : storedData;
-        std::string result = ipc2.read_data();  //共享内存读
+        std::string result = ipc2.read_data();
         std::cout << "Received result: " << result << std::endl;
         response["message"] = result.empty() ? "暂无数据" : result;
         std::cout<<"----------------------get-------------------------------------"<<std::endl;

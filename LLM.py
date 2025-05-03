@@ -9,36 +9,56 @@ import ctypes
 import os
 import time
 
+
 class SharedMemoryIPC:
     def __init__(self, shm_name='/my_shared_mem1', sem_name='/my_semaphore1', size=1024):
         self.shm_name = shm_name
         self.sem_name = sem_name
         self.size = size
-        
+
         # 创建/打开信号量
         try:
+            # self.semaphore = posix_ipc.Semaphore(
+            #     sem_name,
+            #     flags=posix_ipc.O_CREAT,
+            #     mode=0o666,
+            #     initial_value=1
+            # )
+            # print("创建了新的信号量")
+            # print("Semaphore already exists, opening...")
+            self.semaphore = posix_ipc.Semaphore(sem_name)
+            print("打开了已存在的信号量")
+        except posix_ipc.ExistentialError:
             self.semaphore = posix_ipc.Semaphore(
-                sem_name, 
+                sem_name,
                 flags=posix_ipc.O_CREAT,
                 mode=0o666,
                 initial_value=1
             )
-        except posix_ipc.ExistentialError:
-            print("Semaphore already exists, opening...")
-            self.semaphore = posix_ipc.Semaphore(sem_name)
-        
+            print("创建了新的信号量")
+
         # 创建/打开共享内存
         try:
+            # self.shm = posix_ipc.SharedMemory(
+            #     shm_name,
+            #     flags=posix_ipc.O_CREAT,
+            #     # mode=0o666,
+            #     # size=size
+            # )
+            # print("创建了新的共享内存")
+            # #print("Shared memory already exists, opening...")
+            self.shm = posix_ipc.SharedMemory(shm_name)
+            print("打开了已存在的共享内存")
+        except posix_ipc.ExistentialError:
             self.shm = posix_ipc.SharedMemory(
                 shm_name,
                 flags=posix_ipc.O_CREAT,
-                mode=0o666,
-                size=size
+                # mode=0o666,
+                # size=size
             )
-        except posix_ipc.ExistentialError:
-            print("Shared memory already exists, opening...")
-            self.shm = posix_ipc.SharedMemory(shm_name)
-        
+            print("创建了新的共享内存")
+            # print("Shared memory already exists, opening...")
+
         # 创建内存映射
         self.mmap = mmap.mmap(
             self.shm.fd,
@@ -47,45 +67,45 @@ class SharedMemoryIPC:
         )
         # 关闭文件描述符，mmap会保持它打开
         os.close(self.shm.fd)
-    
+
     def read_data(self):
         """从共享内存读取数据"""
         try:
             # 获取信号量
             self.semaphore.acquire()
 
-            #print("python have already read data")
-            
+            # print("python have already read data")
+
             # 读取数据 (去除空字符)
             data = self.mmap.read().decode('utf-8').rstrip('\x00')
             self.mmap.seek(0)  # 重置指针
-            
+
             print("python have already read data")
-            
+
             return data
         finally:
             # 确保释放信号量
             self.semaphore.release()
-    
-    def write_data(self, data = "1"):
+
+    def write_data(self, data="1"):
         """写入数据到共享内存"""
         if len(data) > self.size:
             raise ValueError("Data size exceeds shared memory size")
-        
+
         try:
             # 获取信号量
             self.semaphore.acquire()
-            
+
             # 清空并写入新数据
-            #self.mmap.seek(0)
+            # self.mmap.seek(0)
             self.mmap.write(b"hello work")
             self.mmap.seek(0)  # 重置指针
             self.mmap.flush()
-            print("python have already send data",data)
+            print("python have already send data", data)
         finally:
             # 确保释放信号量
             self.semaphore.release()
-    
+
     def close(self):
         """清理资源"""
         self.mmap.close()
@@ -98,8 +118,7 @@ class SharedMemoryIPC:
 
 if __name__ == "__main__":
 
-
-    dashscope.api_key="xxxxx....9"  #用的阿里QWEN的api
+    dashscope.api_key = "sk-6d3f5ac504e64907ba7a3e7bce73e6e9"
     ipc1 = SharedMemoryIPC()
     ipc2 = SharedMemoryIPC(shm_name='/my_shared_mem2', sem_name='/my_semaphore2', size=1024)
 
@@ -116,7 +135,7 @@ if __name__ == "__main__":
     db = Chroma(persist_directory="./chroma/news_test", embedding_function=embeddings)
 
     while True:
-        message = List(data = ipc1.read_data())
+        message = ipc1.read_data()
 
         if message:
 
@@ -127,13 +146,14 @@ if __name__ == "__main__":
             messages.append({'role': Role.USER, 'content': send_message})
             whole_message = ''
             # 切换模型
-            responses = Generation.call(Generation.Models.qwen_max, messages=messages, result_format='message', stream=True, incremental_output=True)
+            responses = Generation.call(Generation.Models.qwen_max, messages=messages, result_format='message',
+                                        stream=True, incremental_output=True)
             # responses = Generation.call(Generation.Models.qwen_turbo, messages=messages, result_format='message', stream=True, incremental_output=True)
-            print('system:',end='')
+            print('system:', end='')
             for response in responses:
                 whole_message += response.output.choices[0]['message']['content']
                 print(response.output.choices[0]['message']['content'], end='')
-                ipc2.write_data()
+            ipc2.write_data(whole_message)
 
             print()
             messages.append({'role': 'assistant', 'content': whole_message})
