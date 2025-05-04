@@ -496,7 +496,7 @@ private:
         // 处理不同路径的请求
         if (path == "/submit" && method == "POST")   //post请求 发送问题
         {
-            return handlePostRequest(body);
+            return handlePostRequest(body,headers);
         } 
         else if (path == "/getdata" && method == "GET") //get请求 
         {
@@ -506,14 +506,13 @@ private:
         {
             return getAllQuestionKeys();
         }
-        // get-answer实现的很怪 我直接复用“/submit” 在js改成直接发送 /submit路径了
         // else if(path == "/get-answer" && method =="POST")
         // {
         //     return handleGetCachedQuestions(body);
         // }
         else 
         {
-            // 静态文件处理
+            // 静态文件处理 (保留之前的代码)
             //if (path == "/") 
             {
                 path = "/index.html";
@@ -525,7 +524,7 @@ private:
             std::ifstream file(filePath, std::ios::binary);
 
             if (!file.is_open()) {
-                std::cout<<"open index fail"<<std::endl;
+                
                 // 文件不存在，返回404
                 return "HTTP/1.1 404 Not Found\r\n"
                     "Content-Type: text/html\r\n"
@@ -663,8 +662,26 @@ private:
         close(client_fd);
     }
 
-    std::string handlePostRequest(const std::string& body) {
+    std::string handlePostRequest(const std::string& body,std::unordered_map<std::string, std::string> headers) {
         std::cout<<"----------------------------------------post-------------------------------"<<std::endl;
+
+        //check Content-Length && Content-Type
+        auto content_length_it = headers.find("Content-Length");
+        if (content_length_it != headers.end()) {
+            size_t declared_length = std::stoul(content_length_it->second);
+            if (body.size() != declared_length) {
+                return buildJsonResponse(R"({"error": "Content-Length mismatch"})", 400);
+            }
+        }
+        auto content_type_it = headers.find("Content-Type");
+        if(content_type_it == headers.end() || 
+           content_type_it->second.find("application/json") == std::string::npos) {
+            json error;
+            error["error"] = "Invalid Content-Type";
+            return buildJsonResponse(error.dump(), 400);
+        }
+
+
         size_t json_start = body.find("\r\n\r\n");
         
         json_start += 4; // 跳过空行（\r\n\r\n共4字节）
