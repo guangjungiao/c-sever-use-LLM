@@ -7,7 +7,16 @@
         body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
         .container { margin-bottom: 20px; }
         button { padding: 8px 16px; margin-top: 10px; }
-        #response { margin-top: 20px; padding: 10px; border: 1px solid #ddd; }
+        #response { margin-top: 20px; padding: 10px; border: 1px solid #ddd; min-height: 50px; }
+        #cachedQuestions { margin-top: 20px; }
+        .question-item { 
+            padding: 8px; 
+            margin: 5px 0; 
+            background-color: #f5f5f5; 
+            border-radius: 4px; 
+            cursor: pointer;
+        }
+        .question-item:hover { background-color: #e9e9e9; }
     </style>
 </head>
 <body>
@@ -15,53 +24,109 @@
     
     <!-- 发送数据到后端 -->
     <div class="container">
-        <h2>quertion</h2>
-        <input type="text" id="inputData" placeholder="输入要发送的内容">
-        <button id="sendBtn">ask</button>
+        <h2>Question</h2>
+        <input type="text" id="inputData" placeholder="输入你的问题">
+        <button id="sendBtn">Ask</button>
     </div>
     
-    <!-- 从后端获取数据 -->
+    <!-- 显示缓存的问题列表 -->
+    <div class="container" id="cachedQuestions">
+        <h2>History Questions</h2>
+        <div id="questionList"></div>
+    </div>
+    
+    <!-- 显示答案 -->
     <div class="container">
-        <h2>answer</h2>
-        <button id="getBtn">get_answer</button>
+        <h2>Answer</h2>
         <div id="response"></div>
     </div>
 
     <script>
-        // 发送数据到后端
-        document.getElementById('sendBtn').addEventListener('click', async () => {
-            const inputData = document.getElementById('inputData').value;
-            if (!inputData) {
-                alert('请输入内容');
-                return;
-            }
+        // 页面加载时获取缓存的问题列表
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadCachedQuestions();
+        });
 
+        // 加载缓存的问题列表
+        // questions : ["q1","q2",.....] //用列表数组
+        async function loadCachedQuestions() {
             try {
+                const response = await fetch('/get-cached-questions');
+                const data = await response.json();
+                
+                const questionList = document.getElementById('questionList');
+                questionList.innerHTML = '';
+                
+                if (data.questions && data.questions.length > 0) {
+                    data.questions.forEach(question => {
+                        const questionItem = document.createElement('div');
+                        questionItem.className = 'question-item';
+                        questionItem.textContent = question;
+                        questionItem.addEventListener('click', () => getAnswerForQuestion(question));
+                        questionList.appendChild(questionItem);
+                    });
+                } else {
+                    questionList.textContent = 'No cached questions found.';
+                }
+            } catch (error) {
+                console.error('获取缓存问题失败:', error);
+                document.getElementById('questionList').textContent = '加载问题列表失败';
+            }
+        }
+
+        // 获取特定问题的答案
+        async function getAnswerForQuestion(question) {
+            try {
+                document.getElementById('inputData').value = question;
+                const inputData = document.getElementById('inputData').value.trim();
+                document.getElementById('response').textContent = 'Loading answer...';
+                
                 const response = await fetch('/submit', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify( {data:inputData })
+                    //body: JSON.stringify({ question: question })
+                    body: JSON.stringify({ data: inputData })
+                });
+                
+                const data = await response.json();
+                document.getElementById('response').textContent = data.answer || data.message;
+                // 刷新问题列表
+                await loadCachedQuestions();
+            } catch (error) {
+                console.error('获取答案失败:', error);
+                document.getElementById('response').textContent = '获取答案失败';
+            }
+        }
+
+        // 发送新问题到后端
+        document.getElementById('sendBtn').addEventListener('click', async () => {
+            const inputData = document.getElementById('inputData').value.trim();
+            if (!inputData) {
+                alert('请输入问题');
+                return;
+            }
+
+            try {
+                document.getElementById('response').textContent = 'Processing your question...';
+                
+                const response = await fetch('/submit', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ data: inputData })
                 });
                 
                 const result = await response.json();
-                alert(`服务器响应: ${result.message}`);
+                document.getElementById('response').textContent = result.answer || result.message;
+                
+                // 刷新问题列表
+                await loadCachedQuestions();
             } catch (error) {
                 console.error('发送失败:', error);
-                alert('发送失败');
-            }
-        });
-
-        // 从后端获取数据
-        document.getElementById('getBtn').addEventListener('click', async () => {
-            try {
-                const response = await fetch('/getdata');
-                const data = await response.json();
-                document.getElementById('response').textContent = `从服务器获取的数据: ${data.message}`;
-            } catch (error) {
-                console.error('获取数据失败:', error);
-                document.getElementById('response').textContent = '获取数据失败';
+                document.getElementById('response').textContent = '请求失败';
             }
         });
     </script>

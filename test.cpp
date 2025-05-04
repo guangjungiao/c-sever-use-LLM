@@ -24,6 +24,9 @@
 #include <cstring>
 #include <semaphore.h>
 #include <cerrno>
+#include <hiredis/hiredis.h>
+#include <openssl/md5.h> // 用于生成MD5
+#include <unordered_map>
 
 #define PORT 8080
 #define MAX_EVENTS 10000
@@ -193,6 +196,120 @@ private:
     sem_t* sem_;
 };
 
+//Redis封装
+class RedisCache {
+/*
+    key = "qa:" + MD5(question)
+    value = answer
+*/
+
+
+public:
+    RedisCache(const std::string& host = "127.0.0.1", int port = 6379) 
+        : host_(host), port_(port), context_(nullptr) {
+        if(!connect()) return ;
+    }
+    
+    ~RedisCache() {
+        if (context_) {
+            redisFree(context_);
+        }
+    }
+
+    redisContext* get_context_()
+    {
+        return context_;
+    }
+    
+    // 检查并重新连接
+    bool checkConnection() {
+        if (!context_ || context_->err) {
+            if (context_) {
+                redisFree(context_);
+                context_ = nullptr;
+            }
+            return connect();
+        }
+        return true;
+    }
+    
+    // 从缓存获取答案
+    bool getAnswer(const std::string& question, std::string& answer) {
+        if (!checkConnection()) return false;
+        
+        std::string key = "qa:" + generateMD5(question);
+        redisReply* reply = (redisReply*)redisCommand(context_, "GET %s", key.c_str());
+        
+        if (!reply) return false;
+        
+        bool found = false;
+        if (reply->type == REDIS_REPLY_STRING) {
+            answer = std::string(reply->str, reply->len);
+            found = true;
+        }
+        
+        freeReplyObject(reply);
+        return found;
+    }
+    
+    // 设置缓存答案
+    bool setAnswer(const std::string& question, const std::string& answer, int ttl = 3600) {
+        if (!checkConnection()) return false;
+        
+        std::string key = "qa:" + generateMD5(question);
+        save_MD5ToQueswion[key] = question;
+        redisReply* reply = (redisReply*)redisCommand(
+            context_, "SETEX %s %d %s", key.c_str(), ttl, answer.c_str());
+        
+        if (!reply) return false;
+        
+        bool success = (reply->type == REDIS_REPLY_STATUS && 
+                        strcasecmp(reply->str, "OK") == 0);
+        
+        freeReplyObject(reply);
+        return success;
+    }
+
+    std::string getQuestion(const std::string& question)
+    {
+        return save_MD5ToQueswion[question];
+    }
+
+private:
+    bool connect() {
+        context_ = redisConnect(host_.c_str(), port_);
+        if (!context_ || context_->err) {
+            if (context_) {
+                std::cout << "Redis connection error: " << context_->errstr << std::endl;
+                redisFree(context_);
+                context_ = nullptr;
+            } else {
+                std::cout << "Redis connection error: can't allocate redis context" << std::endl;
+            }
+            return false;
+        }
+        std::cout << "Redis connection successed" << std::endl;
+        return true;
+    }
+    
+    std::string generateMD5(const std::string& input) {
+        unsigned char digest[MD5_DIGEST_LENGTH];
+        MD5((const unsigned char*)input.c_str(), input.size(), digest);
+        
+        char mdString[33];
+        for (int i = 0; i < 16; i++)
+            sprintf(&mdString[i*2], "%02x", (unsigned int)digest[i]);
+        
+        return std::string(mdString);
+    }
+
+    std::unordered_map<std::string,std::string> save_MD5ToQueswion;
+
+    std::string host_;
+    int port_;
+    redisContext* context_;
+};
+
 // HTTP服务器类
 class HttpServer 
 {
@@ -281,6 +398,8 @@ private:
 
     SharedMemoryIPC ipc1;//共享内存 sever2pyhton
     SharedMemoryIPC ipc2;//共享内存 python2sever
+
+    RedisCache redisCache;//redis 
 
     void handleNewConnection() {
         struct sockaddr_in client_addr;
@@ -375,12 +494,26 @@ private:
         }
 
         // 处理不同路径的请求
-        if (path == "/submit" && method == "POST") {
+        if (path == "/submit" && method == "POST")   //post请求 发送问题
+        {
             return handlePostRequest(body);
-        } else if (path == "/getdata" && method == "GET") {
+        } 
+        else if (path == "/getdata" && method == "GET") //get请求 
+        {
             return handleGetRequest();
-        } else {
-            // 静态文件处理 (保留之前的代码)
+        }
+        else if(path == "/get-cached-questions" ) //获取缓存问题
+        {
+            return getAllQuestionKeys();
+        }
+        // get-answer实现的很怪 我直接复用“/submit” 在js改成直接发送 /submit路径了
+        // else if(path == "/get-answer" && method =="POST")
+        // {
+        //     return handleGetCachedQuestions(body);
+        // }
+        else 
+        {
+            // 静态文件处理
             //if (path == "/") 
             {
                 path = "/index.html";
@@ -392,7 +525,7 @@ private:
             std::ifstream file(filePath, std::ios::binary);
 
             if (!file.is_open()) {
-                
+                std::cout<<"open index fail"<<std::endl;
                 // 文件不存在，返回404
                 return "HTTP/1.1 404 Not Found\r\n"
                     "Content-Type: text/html\r\n"
@@ -437,6 +570,73 @@ private:
 
     }
 
+    std::string getAllQuestionKeys() {
+        if (!redisCache.checkConnection()) return "";
+        
+        redisReply* reply = (redisReply*)redisCommand(redisCache.get_context_(), "KEYS qa:*");
+        if (!reply || reply->type != REDIS_REPLY_ARRAY) {
+            if (reply) freeReplyObject(reply);
+            return "";
+        }
+
+        json response;
+
+        
+        std::vector<std::string> questions;
+        for (size_t i = 0; i < reply->elements; i++) {
+            //keys.push_back(reply->element[i]->str);
+            //response["questions"] = reply->element[i]->str;
+            //questions.push_back(redisCache.getQuestion(reply->element[i]->str));
+            std::string ii = redisCache.getQuestion(reply->element[i]->str);
+
+            if(ii!="") questions.push_back(ii);
+        }
+        //std::cout<<response<<std::endl;
+
+        response["questions"] = questions;
+        std::cout<<response<<std::endl;
+
+        //std::string result;
+        //keys.push_back(reply->element[0]->str);
+
+        //std::string result = keys[0];
+
+        // json response;
+        
+        // response["message"] = result;
+        
+        freeReplyObject(reply);
+        
+        return buildJsonResponse(response.dump());
+    }
+
+    std::string handleGetCachedQuestions(const std::string& body)
+    {
+        
+        // try {
+        //     auto keys = this.getAllQuestionKeys();
+        //     std::vector<std::string> questions;
+            
+        //     // 这里可以优化为批量获取，而不是一个个获取
+        //     for (const auto& key : keys) {
+        //         std::string answer;
+        //         if (redisCache.getAnswer(key.substr(3), answer)) { // 去掉"qa:"前缀
+        //             questions.push_back(answer);
+        //         }
+        //     }
+            
+        //     json response;
+        //     response["questions"] = questions;
+        //     return buildJsonResponse(response.dump());
+        // } catch (const std::exception& e) {
+        //     res.setStatus(500);
+        //     res.setBody(R"({"error": "Internal server error"})");
+        // }
+        
+    }
+
+
+
     void sendResponse(int client_fd, const std::string& response) {
         size_t total_sent = 0;
         const char* data = response.data();
@@ -478,16 +678,33 @@ private:
             std::cout<<j<<std::endl;
             storedData = j["data"].get<std::string>();
             
-            //shm 共享内存和python通信
-            ipc1.write_data(storedData);
-            std::cout << "Data written to shared memory" <<storedData<< std::endl;
+            //search redisCache
+            std::string answer = "";
+            if(redisCache.getAnswer(storedData, answer))
+            {
+                json response;
+                response["message"] = answer;
+                std::cout<<"cache read"<<std::endl;
+                return buildJsonResponse(response.dump());
+            }
+            else
+            {
+                //shm 共享内存和python通信
+                ipc1.write_data(storedData);
+                std::cout << "Data written to shared memory" <<storedData<< std::endl;
 
-            std::cout<<"-------------------------------storedData33------------------------------"<<storedData<<std::endl;
-            
-            // 构建JSON响应
-            json response;
-            response["message"] = "数据接收成功: " + storedData;
-            return buildJsonResponse(response.dump());
+                std::cout<<"-------------------------------storedData33------------------------------"<<storedData<<std::endl;
+                
+                // 构建JSON响应
+                json response;
+                sleep(3);
+                std::string result = ipc2.read_data();
+                std::cout<<"behind read"<<std::endl;
+                response["message"] = "answering: " + result;
+                //set cache
+                redisCache.setAnswer(storedData,result);
+                return buildJsonResponse(response.dump());
+            }
         } 
         
         catch (const std::exception& e) {
@@ -507,6 +724,10 @@ private:
         response["message"] = result.empty() ? "暂无数据" : result;
         std::cout<<"----------------------get-------------------------------------"<<std::endl;
         std::cout<<response["message"]<<std::endl;
+
+        //set cache
+        //redisCache.setAnswer(storedData,result);
+
         return buildJsonResponse(response.dump());
     }
 
