@@ -104,19 +104,21 @@ private:
 class SharedMemoryIPC 
 {
 public:
-    SharedMemoryIPC(const std::string& shm_name, const std::string& sem_name, size_t size) 
-        : shm_name_(shm_name), sem_name_(sem_name), size_(size) {
+    SharedMemoryIPC(const std::string& shm_name, const std::string& sem_name, size_t size): shm_name_(shm_name), sem_name_(sem_name), size_(size) 
+    {
         // 创建或打开信号量 (初始值为1，二进制信号量)
         sem_ = sem_open(sem_name_.c_str(), O_CREAT, 0666, 1);
-        if (sem_ == SEM_FAILED) {
-            std::cerr << "Failed to create semaphore: " << strerror(errno) << std::endl;
+        if (sem_ == SEM_FAILED) 
+        {
+            std::cout << "Failed to create semaphore: " << strerror(errno) << std::endl;
             exit(EXIT_FAILURE);
         }
 
         // 创建共享内存
         shm_fd_ = shm_open(shm_name_.c_str(), O_CREAT | O_RDWR, 0666);
-        if (shm_fd_ == -1) {
-            std::cerr << "Failed to create shared memory: " << strerror(errno) << std::endl;
+        if (shm_fd_ == -1) 
+        {
+            std::cout << "Failed to create shared memory: " << strerror(errno) << std::endl;
             exit(EXIT_FAILURE);
         }
         ftruncate(shm_fd_, size_);//xitongdiaoyong shezhidaxiao
@@ -161,16 +163,19 @@ public:
         sem_post(sem_); // 释放信号量
     }
 
-    std::string read_data() {
+    std::string read_data() 
+    {
         // 获取信号量
-        if (sem_wait(sem_) == -1) {
+        if (sem_wait(sem_) == -1) 
+        {
             std::cerr << "sem_wait failed: " << strerror(errno) << std::endl;
             return "";
         }
 
         // 映射共享内存
         void* ptr = mmap(0, size_, PROT_READ, MAP_SHARED, shm_fd_, 0);
-        if (ptr == MAP_FAILED) {
+        if (ptr == MAP_FAILED) 
+        {
             std::cerr << "mmap failed: " << strerror(errno) << std::endl;
             sem_post(sem_);
             return "";
@@ -205,13 +210,15 @@ class RedisCache {
 
 
 public:
-    RedisCache(const std::string& host = "127.0.0.1", int port = 6379) 
-        : host_(host), port_(port), context_(nullptr) {
+    RedisCache(const std::string& host = "127.0.0.1", int port = 6379): host_(host), port_(port), context_(nullptr) 
+    {
         if(!connect()) return ;
     }
     
-    ~RedisCache() {
-        if (context_) {
+    ~RedisCache() 
+    {
+        if (context_) 
+        {
             redisFree(context_);
         }
     }
@@ -223,8 +230,10 @@ public:
     
     // 检查并重新连接
     bool checkConnection() {
-        if (!context_ || context_->err) {
-            if (context_) {
+        if (!context_ || context_->err) 
+        {
+            if (context_) 
+            {
                 redisFree(context_);
                 context_ = nullptr;
             }
@@ -253,18 +262,17 @@ public:
     }
     
     // 设置缓存答案
-    bool setAnswer(const std::string& question, const std::string& answer, int ttl = 3600) {
+    bool setAnswer(const std::string& question, const std::string& answer, int ttl = 3600) 
+    {
         if (!checkConnection()) return false;
         
         std::string key = "qa:" + generateMD5(question);
         save_MD5ToQueswion[key] = question;
-        redisReply* reply = (redisReply*)redisCommand(
-            context_, "SETEX %s %d %s", key.c_str(), ttl, answer.c_str());
+        redisReply* reply = (redisReply*)redisCommand(context_, "SETEX %s %d %s", key.c_str(), ttl, answer.c_str());  //SETEX 设置超时淘汰 ttl
         
         if (!reply) return false;
         
-        bool success = (reply->type == REDIS_REPLY_STATUS && 
-                        strcasecmp(reply->str, "OK") == 0);
+        bool success = (reply->type == REDIS_REPLY_STATUS && strcasecmp(reply->str, "OK") == 0);
         
         freeReplyObject(reply);
         return success;
@@ -276,14 +284,19 @@ public:
     }
 
 private:
-    bool connect() {
+    bool connect() 
+    {
         context_ = redisConnect(host_.c_str(), port_);
-        if (!context_ || context_->err) {
-            if (context_) {
+        if (!context_ || context_->err) 
+        {
+            if (context_) 
+            {
                 std::cout << "Redis connection error: " << context_->errstr << std::endl;
                 redisFree(context_);
                 context_ = nullptr;
-            } else {
+            } 
+            else 
+            {
                 std::cout << "Redis connection error: can't allocate redis context" << std::endl;
             }
             return false;
@@ -292,13 +305,13 @@ private:
         return true;
     }
     
-    std::string generateMD5(const std::string& input) {
+    std::string generateMD5(const std::string& input) 
+    {
         unsigned char digest[MD5_DIGEST_LENGTH];
         MD5((const unsigned char*)input.c_str(), input.size(), digest);
         
         char mdString[33];
-        for (int i = 0; i < 16; i++)
-            sprintf(&mdString[i*2], "%02x", (unsigned int)digest[i]);
+        for (int i = 0; i < 16; i++) sprintf(&mdString[i*2], "%02x", (unsigned int)digest[i]);
         
         return std::string(mdString);
     }
@@ -314,20 +327,23 @@ private:
 class HttpServer 
 {
 public:
-    HttpServer() : pool(THREAD_POOL_SIZE) ,ipc1("/my_shared_mem1", "/my_semaphore1", 1024),ipc2("/my_shared_mem2", "/my_semaphore2", 1024){
+    HttpServer() : pool(THREAD_POOL_SIZE) ,ipc1("/my_shared_mem1", "/my_semaphore1", 1024),ipc2("/my_shared_mem2", "/my_semaphore2", 1024)
+    {
         //实例化共享内存对象
         //SharedMemoryIPC ipc("/my_shared_mem", "/my_semaphore", 1024);
 
         // 创建socket
         server_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-        if (server_fd == -1) {
+        if (server_fd == -1) 
+        {
             perror("socket");
             exit(EXIT_FAILURE);
         }
 
         // 设置socket选项
         int opt = 1;
-        if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+        if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) 
+        {
             perror("setsockopt");
             exit(EXIT_FAILURE);
         }
@@ -337,20 +353,23 @@ public:
         address.sin_port = htons(PORT);
 
         // 绑定socket
-        if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) 
+        {
             perror("bind");
             exit(EXIT_FAILURE);
         }
 
         // 监听
-        if (listen(server_fd, SOMAXCONN) < 0) {
+        if (listen(server_fd, SOMAXCONN) < 0) 
+        {
             perror("listen");
             exit(EXIT_FAILURE);
         }
 
         // 创建epoll实例
         epoll_fd = epoll_create1(0);
-        if (epoll_fd == -1) {
+        if (epoll_fd == -1) 
+        {
             perror("epoll_create1");
             exit(EXIT_FAILURE);
         }
@@ -359,7 +378,8 @@ public:
         struct epoll_event ev;
         ev.events = EPOLLIN | EPOLLET; // 边缘触发模式
         ev.data.fd = server_fd;
-        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev) == -1) {
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &ev) == -1) 
+        {
             perror("epoll_ctl: server_fd");
             exit(EXIT_FAILURE);
         }
@@ -367,21 +387,28 @@ public:
         std::cout << "Server started on port " << PORT << std::endl;
     }
 
-    void run() {
+    void run() 
+    {
         struct epoll_event events[MAX_EVENTS];
         
-        while (true) {
+        while (true) 
+        {
             int nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-            if (nfds == -1) {
+            if (nfds == -1) 
+            {
                 perror("epoll_wait");
                 exit(EXIT_FAILURE);
             }
 
-            for (int i = 0; i < nfds; ++i) {
-                if (events[i].data.fd == server_fd) {
+            for (int i = 0; i < nfds; ++i) 
+            {
+                if (events[i].data.fd == server_fd) 
+                {
                     // 处理新连接
                     handleNewConnection();
-                } else {
+                } 
+                else 
+                {
                     int fd1 = events[i].data.fd;
                     // 处理客户端请求
                     pool.enqueue(&HttpServer::handleClient, this, fd1);
@@ -401,7 +428,8 @@ private:
 
     RedisCache redisCache;//redis 
 
-    void handleNewConnection() {
+    void handleNewConnection() 
+    {
         struct sockaddr_in client_addr;
         socklen_t client_addr_len = sizeof(client_addr);
         int client_fd;
@@ -417,41 +445,48 @@ private:
             struct epoll_event ev;
             ev.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
             ev.data.fd = client_fd;
-            if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
+            if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) == -1) 
+            {
                 perror("epoll_ctl: client_fd");
                 close(client_fd);
                 continue;
             }
         }
 
-        if (client_fd == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
+        if (client_fd == -1 && errno != EAGAIN && errno != EWOULDBLOCK) 
+        {
             perror("accept");
         }
     }
 
-    void handleClient(int client_fd) {
+    void handleClient(int client_fd) 
+    {
         char buffer[BUFFER_SIZE];
         ssize_t bytes_read;
         std::string request;
 
         // 读取请求数据
-        while ((bytes_read = read(client_fd, buffer, BUFFER_SIZE - 1)) > 0) {
+        while ((bytes_read = read(client_fd, buffer, BUFFER_SIZE - 1)) > 0) 
+        {
             buffer[bytes_read] = '\0';
             request.append(buffer);
             
             // 简单判断请求是否结束(根据空行)
-            if (request.find("\r\n\r\n") != std::string::npos) {
+            if (request.find("\r\n\r\n") != std::string::npos) 
+            {
                 break;
             }
         }
 
-        if (bytes_read == -1 && errno != EAGAIN) {
+        if (bytes_read == -1 && errno != EAGAIN) 
+        {
             perror("read");
             closeClient(client_fd);
             return;
         }
 
-        if (request.empty()) {
+        if (request.empty()) 
+        {
             closeClient(client_fd);
             return;
         }
@@ -464,7 +499,8 @@ private:
         closeClient(client_fd);
     }
 
-    std::string processRequest( std::string& request) {
+    std::string processRequest( std::string& request) 
+    {
         std::cout<<request<<std::endl;
         std::istringstream iss(request);
         std::string method, path, protocol;
@@ -473,9 +509,11 @@ private:
         // 解析请求头
         std::unordered_map<std::string, std::string> headers;
         std::string line;
-        while (std::getline(iss, line) && line != "\r") {
+        while (std::getline(iss, line) && line != "\r") 
+        {
             size_t colon = line.find(':');
-            if (colon != std::string::npos) {
+            if (colon != std::string::npos) 
+            {
                 std::string key = line.substr(0, colon);
                 std::string value = line.substr(colon + 1);
                 // 去除首尾空白字符
@@ -523,7 +561,8 @@ private:
             std::string filePath = "." + path;
             std::ifstream file(filePath, std::ios::binary);
 
-            if (!file.is_open()) {
+            if (!file.is_open()) 
+            {
                 
                 // 文件不存在，返回404
                 return "HTTP/1.1 404 Not Found\r\n"
@@ -569,11 +608,13 @@ private:
 
     }
 
-    std::string getAllQuestionKeys() {
+    std::string getAllQuestionKeys() 
+    {
         if (!redisCache.checkConnection()) return "";
         
         redisReply* reply = (redisReply*)redisCommand(redisCache.get_context_(), "KEYS qa:*");
-        if (!reply || reply->type != REDIS_REPLY_ARRAY) {
+        if (!reply || reply->type != REDIS_REPLY_ARRAY) 
+        {
             if (reply) freeReplyObject(reply);
             return "";
         }
@@ -582,7 +623,8 @@ private:
 
         
         std::vector<std::string> questions;
-        for (size_t i = 0; i < reply->elements; i++) {
+        for (size_t i = 0; i < reply->elements; i++) 
+        {
             //keys.push_back(reply->element[i]->str);
             //response["questions"] = reply->element[i]->str;
             //questions.push_back(redisCache.getQuestion(reply->element[i]->str));
@@ -636,7 +678,8 @@ private:
 
 
 
-    void sendResponse(int client_fd, const std::string& response) {
+    void sendResponse(int client_fd, const std::string& response) 
+    {
         size_t total_sent = 0;
         const char* data = response.data();
         size_t remaining = response.size();
@@ -644,7 +687,8 @@ private:
         while (remaining > 0) {
             ssize_t sent = write(client_fd, data + total_sent, remaining);
             if (sent == -1) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) 
+                {
                     // 资源暂时不可用，稍后再试
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     continue;
@@ -657,25 +701,29 @@ private:
         }
     }
 
-    void closeClient(int client_fd) {
+    void closeClient(int client_fd) 
+    {
         epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, nullptr);
         close(client_fd);
     }
 
-    std::string handlePostRequest(const std::string& body,std::unordered_map<std::string, std::string> headers) {
+    std::string handlePostRequest(const std::string& body,std::unordered_map<std::string, std::string> headers) 
+    {
         std::cout<<"----------------------------------------post-------------------------------"<<std::endl;
 
         //check Content-Length && Content-Type
         auto content_length_it = headers.find("Content-Length");
-        if (content_length_it != headers.end()) {
+        if (content_length_it != headers.end()) 
+        {
             size_t declared_length = std::stoul(content_length_it->second);
-            if (body.size() != declared_length) {
+            if (body.size() != declared_length) 
+            {
                 return buildJsonResponse(R"({"error": "Content-Length mismatch"})", 400);
             }
         }
         auto content_type_it = headers.find("Content-Type");
-        if(content_type_it == headers.end() || 
-           content_type_it->second.find("application/json") == std::string::npos) {
+        if(content_type_it == headers.end() || content_type_it->second.find("application/json") == std::string::npos) 
+        {
             json error;
             error["error"] = "Invalid Content-Type";
             return buildJsonResponse(error.dump(), 400);
@@ -733,7 +781,8 @@ private:
         
     }
 
-    std::string handleGetRequest() {
+    std::string handleGetRequest() 
+    {
         json response;
         //response["message"] = storedData.empty() ? "暂无数据" : storedData;
         std::string result = ipc2.read_data();
@@ -748,7 +797,8 @@ private:
         return buildJsonResponse(response.dump());
     }
 
-    std::string serveStaticFile( std::string& path) {
+    std::string serveStaticFile( std::string& path) 
+    {
         // ... 保留之前的静态文件处理代码 ...
         // if (path == "/") {
         //     path = "/index.html";
@@ -758,7 +808,8 @@ private:
         std::string filePath = "./index.html";
         std::ifstream file(filePath, std::ios::binary);
 
-        if (!file.is_open()) {
+        if (!file.is_open()) 
+        {
             std::cout<<"fail open"<<std::endl;
             // 文件不存在，返回404
             return "HTTP/1.1 404 Not Found\r\n"
@@ -800,7 +851,8 @@ private:
         return response.str();
     }
 
-    std::string buildJsonResponse(const std::string& jsonContent, int statusCode = 200) {
+    std::string buildJsonResponse(const std::string& jsonContent, int statusCode = 200) 
+    {
         std::ostringstream response;
         response << "HTTP/1.1 " << statusCode << " " << getStatusMessage(statusCode) << "\r\n"
                  << "Content-Type: application/json\r\n"
@@ -811,8 +863,10 @@ private:
         return response.str();
     }
 
-    std::string getStatusMessage(int statusCode) {
-        switch(statusCode) {
+    std::string getStatusMessage(int statusCode) 
+    {
+        switch(statusCode) 
+        {
             case 200: return "OK";
             case 400: return "Bad Request";
             case 404: return "Not Found";
