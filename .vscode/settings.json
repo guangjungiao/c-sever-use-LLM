@@ -1,5 +1,6 @@
 {
     "files.associations": {
+        "*.py": "python",
         "cctype": "cpp",
         "clocale": "cpp",
         "cmath": "cpp",
@@ -59,6 +60,9 @@
         "thread": "cpp",
         "cinttypes": "cpp",
         "typeinfo": "cpp",
-        "valarray": "cpp"
+        "valarray": "cpp",
+        "xhash": "cpp",
+        "xstring": "cpp",
+        "xutility": "cpp"
     }
 }
