@@ -239,6 +239,8 @@ public:
         
         std::string key = "qa:" + generateMD5(question);
         redisReply* reply = (redisReply*)redisCommand(context_, "GET %s", key.c_str());
+
+        if((!reply) && (save_MD5ToQueswion.count(key))) save_MD5ToQueswion.erase(key);  //查询检查 实现哈希表和redis的同步 后续继续优化 可以配置redis键空间通知和回调触发订阅来删除 
         
         if (!reply) return false;
         
