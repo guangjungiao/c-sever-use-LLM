@@ -10,7 +10,7 @@
 
 ![alt text](600a3eb8db672a611a6a557139bc0af.png)
 
-- redis结合MD5作为key 设计为：“key = "qa:" + MD5(question) ， value = answer” 同时，参考了别的网站，有历史问题列表，将redis中的问题显示出来，可以直接查看。在输入问题发送post请求后，同时前端发送个"/get-cached-questions"路径的post请求，响应时会把redis的key取出来，同时我用一个unordered_map哈希表，存储MD5和对应的问题作为值，响应回来，在前端页面显示出来这些问题，当作历史的提问。如果想查看历史问题的话，点击历史问题，将会直接从redis缓存中取出答案。（如果实现高性能的话，还是得引入连接池）
+- redis结合MD5作为key 设计为：“key = "qa:" + MD5(question) ， value = answer” 。考虑到每次输入相同问题时，LLM的生成式回答都不一样，避免相同问题的输入被覆盖，采用MD5进行映射作为键。同时，参考了别的网站，有历史问题列表，将redis中的问题显示出来，可以直接查看。在输入问题发送post请求后，同时前端发送个"/get-cached-questions"路径的post请求，响应时会把redis的key取出来，同时我用一个unordered_map哈希表（后续打算还是会优化成本地磁盘进行存储或者数据库），存储MD5和对应的问题作为值，为了实现两者的同步，我配置了键空间通知，在服务器中开启子线程进行话题的订阅，同时加锁修改哈希表的数据，实现两者的同步。redis也配置了RDB快照实现持久化（后续打算增加应用层的持久化），从另一进程响应回来，在前端页面显示出来这些问题，当作历史的提问。如果想查看历史问题的话，点击历史问题，将会直接从redis缓存中取出答案。（如果实现高性能的话，还是得引入连接池）
 
 
 
@@ -19,7 +19,7 @@
 
 
 ### 2. 使用说明
-- 准备好ubuntu22.04 python3.11 c++11 json huggingface中的text2vec模型  redis 。。。
+- 准备好ubuntu22.04 python3.11 c++11 json huggingface中的text2vec模型  redis的hiredis库、 redis的config文件的配置修改。
 - 去QWEN官网准备好阿里云和QWEN的api
 - pip install -r requirements.txt
 - bash ./build_run.sh

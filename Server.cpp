@@ -239,8 +239,6 @@ public:
         
         std::string key = "qa:" + generateMD5(question);
         redisReply* reply = (redisReply*)redisCommand(context_, "GET %s", key.c_str());
-
-        if((!reply) && (save_MD5ToQueswion.count(key))) save_MD5ToQueswion.erase(key);  //查询检查 实现哈希表和redis的同步 后续继续优化 可以配置redis键空间通知和回调触发订阅来删除 
         
         if (!reply) return false;
         
@@ -259,7 +257,10 @@ public:
         if (!checkConnection()) return false;
         
         std::string key = "qa:" + generateMD5(question);
-        save_MD5ToQueswion[key] = question;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            save_MD5ToQueswion[key] = question;
+        }
         redisReply* reply = (redisReply*)redisCommand(
             context_, "SETEX %s %d %s", key.c_str(), ttl, answer.c_str());
         
@@ -274,6 +275,7 @@ public:
 
     std::string getQuestion(const std::string& question)
     {
+        std::lock_guard<std::mutex> lock(mutex_);
         return save_MD5ToQueswion[question];
     }
 
@@ -305,11 +307,80 @@ private:
         return std::string(mdString);
     }
 
+    bool subscribeToExpiredEvents() {
+        sub_context_ = redisConnect(host_.c_str(), port_);
+        if (!sub_context_ || sub_context_->err) {
+            if (sub_context_) {
+                std::cerr << "Redis subscription error: " << sub_context_->errstr << std::endl;
+                redisFree(sub_context_);
+                sub_context_ = nullptr;
+            } else {
+                std::cerr << "Redis subscription error: can't allocate redis context" << std::endl;
+            }
+            return false;
+        }
+
+        // 订阅键空间通知
+        redisReply* reply = (redisReply*)redisCommand(
+            sub_context_, "PSUBSCRIBE __keyevent@0__:expired");
+        if (!reply || reply->type == REDIS_REPLY_ERROR) {
+            std::cerr << "Failed to subscribe to expired events" << std::endl;
+            if (reply) freeReplyObject(reply);
+            return false;
+        }
+        freeReplyObject(reply);
+
+        // 启动监听线程
+        running_ = true;
+        sub_thread_ = std::thread(&RedisCache::listenForExpiredEvents, this);
+        return true;
+    }
+
+    // 监听过期事件的线程函数
+    void listenForExpiredEvents() {
+        while (running_) {
+            redisReply* reply = nullptr;
+            if (redisGetReply(sub_context_, (void**)&reply) == REDIS_OK) {
+                if (reply && reply->type == REDIS_REPLY_ARRAY && reply->elements == 4) {
+                    // 格式: ["pmessage", "__keyevent@0__:expired", "__keyevent@0__:expired", "key"]
+                    std::string key(reply->element[3]->str, reply->element[3]->len);
+                    
+                    // 检查是否是我们关心的key
+                    if (key.find("qa:") == 0) {
+                        
+                        
+                        // 从内存映射中删除
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        save_MD5ToQueswion.erase(key);
+                    }
+                }
+                if (reply) freeReplyObject(reply);
+            } else {
+                // 连接错误，尝试重新连接
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                redisFree(sub_context_);
+                sub_context_ = nullptr;
+                if (!subscribeToExpiredEvents()) {
+                    std::this_thread::sleep_for(std::chrono::seconds(5));
+                }
+            }
+        }
+    }
+
+    
+    
+    
+
     std::unordered_map<std::string,std::string> save_MD5ToQueswion;
 
     std::string host_;
     int port_;
     redisContext* context_;
+
+    redisContext* sub_context_;
+    std::thread sub_thread_;
+    std::atomic<bool> running_;
+    std::mutex mutex_;
 };
 
 // HTTP服务器类
@@ -619,8 +690,7 @@ private:
         //     std::vector<std::string> questions;
             
         //     // 这里可以优化为批量获取，而不是一个个获取
-        //     for (const auto& key : keys) 
-        //     {
+        //     for (const auto& key : keys) {
         //         std::string answer;
         //         if (redisCache.getAnswer(key.substr(3), answer)) { // 去掉"qa:"前缀
         //             questions.push_back(answer);
@@ -631,7 +701,8 @@ private:
         //     response["questions"] = questions;
         //     return buildJsonResponse(response.dump());
         // } catch (const std::exception& e) {
-        //     return buildJsonResponse("");
+        //     res.setStatus(500);
+        //     res.setBody(R"({"error": "Internal server error"})");
         // }
         
     }
@@ -677,9 +748,11 @@ private:
             }
         }
         auto content_type_it = headers.find("Content-Type");
-        // if(content_type_it == headers.end() || content_type_it->second.find("application/json") == std::string::npos) 
-        // {
-       
+        // if(content_type_it == headers.end() || content_type_it->second.find("application/json") == std::string::npos) {
+        //     json error;
+        //     error["error"] = "Invalid Content-Type";
+        //     std::cout<<"Content-Type error!!!!"<<std::endl;
+        //     return buildJsonResponse(error.dump(), 400);
         // }
         if (content_type_it != headers.end()) {
             std::string declared_length = content_type_it->second;
